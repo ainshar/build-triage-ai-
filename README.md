@@ -1,35 +1,108 @@
 # Build Triage AI
 
-AI-powered CI/CD build failure triage system using Claude to analyze build logs, classify root causes, and suggest fixes.
+AI-powered CI/CD build failure triage system that uses Claude to analyze build logs, classify root causes, and suggest fixes automatically.
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              Build Triage AI                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                    ┌─────────────────────────────────┐
+                    │        CI/CD Systems            │
+                    │  (GitHub Actions, Jenkins, etc) │
+                    └───────────────┬─────────────────┘
+                                    │
+                                    ▼ Webhook (POST /webhook/build-failure)
+                    ┌─────────────────────────────────┐
+                    │         FastAPI Server          │
+                    │  ┌───────────────────────────┐  │
+                    │  │    Request Validation     │  │
+                    │  │    Rate Limiting          │  │
+                    │  │    Authentication         │  │
+                    │  └───────────────────────────┘  │
+                    └───────────────┬─────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+                    ▼                               ▼
+    ┌───────────────────────────┐   ┌───────────────────────────┐
+    │      Log Processor        │   │     Metrics Collector     │
+    │  ┌─────────────────────┐  │   │  ┌─────────────────────┐  │
+    │  │ Truncation          │  │   │  │ Request count       │  │
+    │  │ Error extraction    │  │   │  │ Latency (p50/p99)   │  │
+    │  │ Context enrichment  │  │   │  │ Error rate          │  │
+    │  └─────────────────────┘  │   │  │ Analysis confidence │  │
+    └───────────────┬───────────┘   │  └─────────────────────┘  │
+                    │               └───────────────────────────┘
+                    ▼
+    ┌───────────────────────────────────────────────────────────┐
+    │                    Build Analyzer                          │
+    │  ┌─────────────────────────────────────────────────────┐  │
+    │  │                  Claude API                          │  │
+    │  │  • Structured prompting for consistent output        │  │
+    │  │  • JSON schema enforcement                           │  │
+    │  │  • Retry with exponential backoff                    │  │
+    │  └─────────────────────────────────────────────────────┘  │
+    │  ┌─────────────────────────────────────────────────────┐  │
+    │  │              Response Parser                         │  │
+    │  │  • JSON extraction from markdown                     │  │
+    │  │  • Schema validation                                 │  │
+    │  │  • Fallback handling                                 │  │
+    │  └─────────────────────────────────────────────────────┘  │
+    └───────────────┬───────────────────────────────────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────────────────────────────────┐
+    │                   Analysis Result                          │
+    │  {                                                         │
+    │    "category": "code_error | test_failure | flaky_test",  │
+    │    "summary": "Brief description",                         │
+    │    "root_cause": "Detailed explanation",                   │
+    │    "suggestions": [...],                                   │
+    │    "confidence": 0.85                                      │
+    │  }                                                         │
+    └───────────────┬───────────────────────────────────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────────────────────────────────┐
+    │                  GitHub Client                             │
+    │  ┌─────────────────────────────────────────────────────┐  │
+    │  │ Confidence threshold check (default: 0.7)           │  │
+    │  │ Markdown comment formatting                          │  │
+    │  │ PR comment posting via GitHub API                    │  │
+    │  └─────────────────────────────────────────────────────┘  │
+    └───────────────────────────────────────────────────────────┘
+```
 
 ## Features
 
-- **Webhook Integration**: Receives build failure notifications from CI systems (GitHub Actions, Jenkins, TeamCity)
+- **Webhook Integration**: Receives build failure notifications from CI systems
 - **Intelligent Analysis**: Uses Claude to analyze build logs and identify root causes
-- **Classification**: Categorizes failures (code error, infra issue, flaky test, dependency problem)
-- **Fix Suggestions**: Provides actionable suggestions based on failure patterns
+- **Classification**: Categorizes failures into actionable categories
+- **Fix Suggestions**: Provides code suggestions with confidence scores
 - **PR Comments**: Automatically posts diagnosis to GitHub PRs
-- **Confidence Scoring**: Only suggests fixes above configurable confidence thresholds
+- **Observability**: Structured logging, metrics, and tracing support
 
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.11+
-- PostgreSQL (optional, for persistence)
 - Anthropic API key
-- GitHub token (for PR comments)
+- GitHub token (optional, for PR comments)
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/ainshar/build-triage-ai.git
-cd build-triage-ai
+git clone https://github.com/ainshar/build-triage-ai-.git
+cd build-triage-ai-
 
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # Install dependencies
 pip install -e ".[dev]"
@@ -41,81 +114,83 @@ cp .env.example .env
 
 ### Configuration
 
-Create a `.env` file:
-
 ```env
-ANTHROPIC_API_KEY=your_anthropic_api_key
-GITHUB_TOKEN=your_github_token
-DATABASE_URL=postgresql://user:pass@localhost/build_triage  # Optional
-LOG_LEVEL=INFO
+# Required
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional - for PR comments
+GITHUB_TOKEN=ghp_...
+
+# Analysis settings
 CONFIDENCE_THRESHOLD=0.7
+MAX_LOG_LENGTH=50000
+
+# Claude settings
+CLAUDE_MODEL=claude-sonnet-4-20250514
 ```
 
 ### Running
 
 ```bash
-# Start the server
+# Development
 uvicorn src.build_triage.main:app --reload
 
-# Or with Docker
+# Production
+uvicorn src.build_triage.main:app --host 0.0.0.0 --port 8000
+
+# Docker
 docker-compose up
 ```
 
-### Usage
+## API Reference
 
-#### Webhook Endpoint
+### POST /webhook/build-failure
 
-Configure your CI system to POST to `/webhook/build-failure`:
+Receives build failure webhooks from CI systems.
 
 ```json
 {
   "build_id": "12345",
   "repo": "owner/repo",
   "branch": "main",
-  "commit_sha": "abc123",
+  "commit_sha": "abc123def456",
   "pr_number": 42,
   "status": "failed",
-  "logs_url": "https://ci.example.com/builds/12345/logs",
-  "logs": "Optional inline logs..."
+  "logs": "Build output logs...",
+  "logs_url": "https://ci.example.com/builds/12345/logs"
 }
 ```
 
-#### Manual Analysis
-
-```bash
-curl -X POST http://localhost:8000/analyze \
-  -H "Content-Type: application/json" \
-  -d '{"logs": "your build logs here..."}'
-```
-
-## Architecture
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   CI System     │────▶│  Build Triage   │────▶│   Claude API    │
-│ (GitHub/Jenkins)│     │     Service     │     │                 │
-└─────────────────┘     └────────┬────────┘     └─────────────────┘
-                                 │
-                                 ▼
-                        ┌─────────────────┐
-                        │   GitHub API    │
-                        │  (PR Comments)  │
-                        └─────────────────┘
-```
-
-## API Reference
-
-### POST /webhook/build-failure
-Receives build failure notifications from CI systems.
-
 ### POST /analyze
-Analyzes build logs and returns diagnosis.
+
+Manual log analysis endpoint.
+
+```json
+{
+  "logs": "Build logs to analyze...",
+  "context": "Optional additional context"
+}
+```
 
 ### GET /health
-Health check endpoint.
 
-### GET /analyses/{build_id}
-Retrieves previous analysis results.
+Health check endpoint returning service status.
+
+### GET /metrics
+
+Prometheus-compatible metrics endpoint.
+
+## Failure Categories
+
+| Category | Description | Example |
+|----------|-------------|---------|
+| `code_error` | Compilation or syntax errors | Missing import, type error |
+| `test_failure` | Test assertion failures | Expected vs actual mismatch |
+| `flaky_test` | Intermittent failures | Race condition, timing issue |
+| `dependency` | Package or dependency issues | Version conflict, missing package |
+| `infrastructure` | CI/CD infrastructure problems | Network timeout, resource limits |
+| `timeout` | Build or test timeouts | Long-running test, infinite loop |
+| `unknown` | Unclassifiable failures | Requires manual investigation |
 
 ## Development
 
@@ -124,7 +199,7 @@ Retrieves previous analysis results.
 pytest
 
 # Run with coverage
-pytest --cov=src
+pytest --cov=src --cov-report=html
 
 # Lint
 ruff check src tests
@@ -136,17 +211,30 @@ ruff format src tests
 mypy src
 ```
 
-## Classification Categories
+## Project Structure
 
-| Category | Description |
-|----------|-------------|
-| `code_error` | Syntax errors, type errors, logic bugs |
-| `test_failure` | Assertion failures, test logic issues |
-| `flaky_test` | Intermittent failures, race conditions |
-| `dependency` | Package conflicts, missing dependencies |
-| `infrastructure` | Network issues, resource limits, CI config |
-| `timeout` | Build or test timeouts |
-| `unknown` | Unclassifiable failures |
+```
+build-triage-ai/
+├── src/
+│   └── build_triage/
+│       ├── __init__.py
+│       ├── main.py           # FastAPI application
+│       ├── analyzer.py       # Claude integration
+│       ├── github_client.py  # GitHub API client
+│       ├── models.py         # Pydantic models
+│       ├── config.py         # Configuration
+│       ├── metrics.py        # Observability
+│       └── errors.py         # Error handling
+├── tests/
+│   ├── test_analyzer.py
+│   ├── test_api.py
+│   └── test_github_client.py
+├── docs/
+│   └── DESIGN.md            # Architecture decisions
+├── Dockerfile
+├── docker-compose.yml
+└── pyproject.toml
+```
 
 ## License
 

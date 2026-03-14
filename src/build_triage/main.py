@@ -6,10 +6,13 @@ import structlog
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi.responses import PlainTextResponse
+
 from . import __version__
 from .analyzer import BuildAnalyzer
 from .config import get_settings
 from .github_client import GitHubClient
+from .metrics import metrics
 from .models import (
     AnalysisResult,
     AnalyzeRequest,
@@ -174,6 +177,20 @@ async def webhook_build_failure(
         )
 
     return result
+
+
+@app.get("/metrics", tags=["System"])
+async def get_metrics() -> PlainTextResponse:
+    """
+    Export metrics in Prometheus format.
+
+    Returns metrics including analysis counts, latencies,
+    confidence distributions, and error rates.
+    """
+    return PlainTextResponse(
+        content=metrics.export_prometheus(),
+        media_type="text/plain; charset=utf-8",
+    )
 
 
 @app.get(
